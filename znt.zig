@@ -214,6 +214,11 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
             }
         }
 
+        /// Returns the number of entities with the specified component
+        pub fn count(self: Self, comptime comp: Component) u32 {
+            return self.components[@enumToInt(comp)].count;
+        }
+
         /// The component specified first will be the one iterated through. If you know
         /// which component is likely to have the least entries, specify that one first.
         pub fn iter(self: *const Self, comptime components: []const Component) //
@@ -281,6 +286,7 @@ const invalid_addr = std.math.maxInt(Addr);
 fn DataStore(comptime T: type) type {
     return struct {
         entries: std.ArrayListUnmanaged(Entry) = .{},
+        count: Addr = 0, // Number of allocated entries
         free: Addr = invalid_addr, // Address of the first free entry, if any
 
         const Self = @This();
@@ -298,12 +304,14 @@ fn DataStore(comptime T: type) type {
                 const addr = self.free;
                 self.free = self.entries.items[addr].free;
                 self.entries.items[addr] = .{ .alloced = value };
+                self.count += 1;
                 return addr;
             }
 
             const addr = self.entries.items.len;
             if (addr >= invalid_addr) return error.OutOfMemory;
             try self.entries.append(allocator, .{ .alloced = value });
+            self.count += 1;
             return @intCast(Addr, addr);
         }
 
@@ -320,6 +328,7 @@ fn DataStore(comptime T: type) type {
             std.debug.assert(self.entries[addr] == .alloced);
             self.entries[addr] = .{ .free = self.free };
             self.free = addr;
+            self.count -= 1;
         }
 
         pub fn iter(self: *const Self) Iterator {
