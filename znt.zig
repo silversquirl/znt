@@ -73,7 +73,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
                 fields[i + 1] = .{
                     .name = field.name,
                     .field_type = ?field.field_type,
-                    .default_value = @as(?field.field_type, null),
+                    .default_value = @as(??field.field_type, @as(?field.field_type, null)),
                     .is_comptime = false,
                     .alignment = @alignOf(?field.field_type),
                 };
