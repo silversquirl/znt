@@ -169,7 +169,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
             const addr = self.id_map.get(eid) orelse return null;
 
             // Retrieve all components
-            const entity: PartialEntity(components) = undefined;
+            var entity: PartialEntity(components) = undefined;
             const indices = self.entities.get(addr).?.indices;
             inline for (components) |comp| {
                 const field = std.meta.fieldInfo(Entity, comp);
@@ -258,10 +258,10 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
                         inline for (required_components) |comp_id, i| {
                             const comp = if (i == 0)
                                 &res.component
-                            else if (self.scene.getComponent(comp_id, ei.indices)) |comp|
-                                comp
                             else
-                                continue :search; // If we're missing a component, skip this entity and keep looking
+                                self.scene.getComponent(comp_id, ei.indices) orelse
+                                    // If we're missing a component, skip this entity and keep looking
+                                    continue :search;
                             const field = std.meta.fieldInfo(Entity, comp_id);
                             @field(entity, field.name) = comp;
                         }
@@ -351,3 +351,89 @@ fn DataStore(comptime T: type) type {
         };
     };
 }
+
+test "create scene" {
+    var scene = TestScene.init(std.testing.allocator);
+    defer scene.deinit();
+}
+
+test "add/get entities" {
+    var scene = TestScene.init(std.testing.allocator);
+    defer scene.deinit();
+
+    const e1 = try scene.add(.{});
+    const e2 = try scene.add(.{ .x = .{} });
+    const e3 = try scene.add(.{ .y = .{ .a = 7 } });
+    const e4 = try scene.add(.{ .z = 10 });
+
+    try std.testing.expect(scene.get(&.{}, e1) != null);
+    try std.testing.expect(scene.get(&.{.x}, e2) != null);
+    try std.testing.expectEqual(@as(i32, 7), scene.get(&.{.y}, e3).?.y.a);
+    try std.testing.expectEqual(@as(i32, 10), scene.get(&.{.z}, e4).?.z.*);
+}
+
+test "get multiple components" {
+    var scene = TestScene.init(std.testing.allocator);
+    defer scene.deinit();
+
+    const id = try scene.add(.{ .x = .{}, .y = .{ .a = 7 }, .z = 10 });
+    const ent = scene.get(&.{ .x, .y, .z }, id) orelse return error.UnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 7), ent.y.a);
+    try std.testing.expectEqual(@as(i32, 10), ent.z.*);
+}
+
+test "iterate entities" {
+    var scene = TestScene.init(std.testing.allocator);
+    defer scene.deinit();
+
+    _ = try scene.add(.{});
+    _ = try scene.add(.{ .x = .{} });
+    _ = try scene.add(.{ .y = .{ .a = 7 } });
+    _ = try scene.add(.{ .z = 10 });
+    _ = try scene.add(.{ .y = .{ .a = 3 } });
+    _ = try scene.add(.{ .z = 11, .x = .{} });
+    _ = try scene.add(.{ .z = 12, .y = .{ .a = 3 } });
+    _ = try scene.add(.{ .z = 13 });
+
+    var n: i32 = 10;
+    var it = scene.iter(&.{.z});
+    while (it.next()) |ent| {
+        try std.testing.expectEqual(n, ent.z.*);
+        n += 1;
+    }
+}
+
+test "iterate multiple components" {
+    var scene = TestScene.init(std.testing.allocator);
+    defer scene.deinit();
+
+    _ = try scene.add(.{});
+    _ = try scene.add(.{ .x = .{} });
+    _ = try scene.add(.{ .y = .{ .a = 7 } });
+    _ = try scene.add(.{ .z = 10 });
+    _ = try scene.add(.{ .y = .{ .a = 3 } });
+    _ = try scene.add(.{ .z = 11, .x = .{}, .y = .{ .a = 3 } });
+    _ = try scene.add(.{ .z = 12, .y = .{ .a = 3 } });
+    _ = try scene.add(.{ .z = 13 });
+    _ = try scene.add(.{ .z = 12, .x = .{}, .y = .{ .a = 4 } });
+    _ = try scene.add(.{ .z = 13 });
+    _ = try scene.add(.{ .z = 13, .x = .{}, .y = .{ .a = 5 } });
+    _ = try scene.add(.{ .z = 12, .y = .{ .a = 3 } });
+    _ = try scene.add(.{ .z = 14, .x = .{}, .y = .{ .a = 6 } });
+
+    var y: i32 = 3;
+    var z: i32 = 11;
+    var it = scene.iter(&.{ .z, .y, .x });
+    while (it.next()) |ent| {
+        try std.testing.expectEqual(y, ent.y.a);
+        try std.testing.expectEqual(z, ent.z.*);
+        y += 1;
+        z += 1;
+    }
+}
+
+const TestScene = Scene(struct {
+    x: struct {},
+    y: struct { a: i32 },
+    z: i32,
+}, .{});
