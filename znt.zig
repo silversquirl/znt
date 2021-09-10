@@ -300,7 +300,8 @@ fn DataStore(comptime T: type) type {
             self.entries.deinit(allocator);
         }
 
-        pub fn add(self: *Self, allocator: *std.mem.Allocator, value: T) std.mem.Allocator.Error!Addr {
+        // HACK: noinline is a workaround for a compiler bug - see comment on "6 components" test
+        pub noinline fn add(self: *Self, allocator: *std.mem.Allocator, value: T) std.mem.Allocator.Error!Addr {
             if (self.free != invalid_addr) {
                 const addr = self.free;
                 self.free = self.entries.items[addr].free;
@@ -438,3 +439,23 @@ const TestScene = Scene(struct {
     y: struct { a: i32 },
     z: i32,
 }, .{});
+
+// This tests a bug where between 4 and 7 components (inclusive) causes a
+// segfault after the first add, iff compiling in a release mode
+test "6 components" {
+    const BigScene = Scene(struct {
+        a: void,
+        b: void,
+        c: void,
+        d: void,
+        e: void,
+        f: void,
+    }, .{});
+    var scene = BigScene.init(std.testing.allocator);
+    defer scene.deinit();
+
+    _ = try scene.add(.{});
+    _ = try scene.add(.{});
+    _ = try scene.add(.{});
+    _ = try scene.add(.{});
+}
