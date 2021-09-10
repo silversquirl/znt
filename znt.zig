@@ -152,8 +152,9 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
                 }
             }
 
-            try self.id_map.put(self.allocator, ei.eid, addr);
-            return ei.eid;
+            const eid = ei.eid; // HACK: Workaround for stage1 bug
+            try self.id_map.put(self.allocator, eid, addr);
+            return eid;
         }
 
         fn genEid(self: *Self) EntityId {
