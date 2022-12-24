@@ -19,7 +19,7 @@ pub const SceneOptions = struct {
 
 pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
     return struct {
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         rng: opts.RandomSource,
         id_map: IdMap = .{},
         entities: DataStore(EntityI) = .{},
@@ -39,9 +39,8 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
             var fields = std.meta.fields(Entity)[0..component_count].*;
             for (fields) |*field, i| {
                 field.name = std.fmt.comptimePrint("{d}", .{i});
-                field.field_type = DataStore(EntityComponent(field.field_type));
-                const default_value: ?field.field_type = field.field_type{};
-                field.default_value = default_value;
+                field.type = DataStore(EntityComponent(field.type));
+                field.default_value = &field.type{};
             }
             break :blk @Type(.{ .Struct = .{
                 .is_tuple = true,
@@ -58,13 +57,12 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
         }
 
         pub const OptionalEntity = blk: {
-            var fields = [_]std.builtin.TypeInfo.StructField{undefined} ** (component_count + 1);
+            var fields = [_]std.builtin.Type.StructField{undefined} ** (component_count + 1);
 
-            const default_id: ?EntityId = null;
             fields[0] = .{
                 .name = "id",
-                .field_type = ?EntityId,
-                .default_value = default_id,
+                .type = ?EntityId,
+                .default_value = &@as(?EntityId, null),
                 .is_comptime = false,
                 .alignment = @alignOf(?EntityId),
             };
@@ -72,10 +70,10 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
             for (std.meta.fields(Entity)) |field, i| {
                 fields[i + 1] = .{
                     .name = field.name,
-                    .field_type = ?field.field_type,
-                    .default_value = @as(??field.field_type, @as(?field.field_type, null)),
+                    .type = ?field.type,
+                    .default_value = &@as(?field.type, null),
                     .is_comptime = false,
-                    .alignment = @alignOf(?field.field_type),
+                    .alignment = @alignOf(?field.type),
                 };
             }
 
@@ -88,11 +86,11 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
         };
 
         pub fn PartialEntity(comptime components: []const Component) type {
-            var fields = [_]std.builtin.TypeInfo.StructField{undefined} ** (components.len + 1);
+            var fields = [_]std.builtin.Type.StructField{undefined} ** (components.len + 1);
 
             fields[0] = .{
                 .name = "id",
-                .field_type = EntityId,
+                .type = EntityId,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(EntityId),
@@ -102,10 +100,10 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
                 var field = std.meta.fieldInfo(Entity, comp);
                 fields[i + 1] = .{
                     .name = field.name,
-                    .field_type = *field.field_type,
+                    .type = *field.type,
                     .default_value = null,
                     .is_comptime = false,
-                    .alignment = @alignOf(*field.field_type),
+                    .alignment = @alignOf(*field.type),
                 };
             }
 
@@ -119,7 +117,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
 
         const Self = @This();
 
-        pub fn init(allocator: *std.mem.Allocator) Self {
+        pub fn init(allocator: std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
                 .rng = opts.RandomSource.init(std.crypto.random.int(u64)),
@@ -158,7 +156,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
         }
 
         fn genEid(self: *Self) EntityId {
-            var id = self.rng.random.int(EntityId);
+            var id = self.rng.random().int(EntityId);
             // Set UUID variant and version
             id &= ~(@as(EntityId, 0xc0_00_f0) << (6 * 8));
             id |= @as(EntityId, 0x80_00_40) << (6 * 8);
@@ -182,7 +180,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
         }
 
         /// If the entity exists, it must have the specified component
-        pub fn getOne(self: Self, comptime comp: Component, eid: EntityId) ?*std.meta.fieldInfo(Entity, comp).field_type {
+        pub fn getOne(self: Self, comptime comp: Component, eid: EntityId) ?*std.meta.fieldInfo(Entity, comp).type {
             const addr = self.id_map.get(eid) orelse return null;
             const indices = self.entities.get(addr).?.indices;
             return self.getComponent(comp, indices).?;
@@ -191,7 +189,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
         pub fn componentByType(comptime T: type) Component {
             var comp_opt: ?Component = null;
             inline for (std.meta.fields(Entity)) |field| {
-                if (field.field_type == T) {
+                if (field.type == T) {
                     if (comp_opt == null) {
                         comp_opt = @field(Component, field.name);
                     } else {
@@ -207,7 +205,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
             }
         }
 
-        fn getComponent(self: Self, comptime comp: Component, indices: [component_count]Addr) ?*std.meta.fieldInfo(Entity, comp).field_type {
+        fn getComponent(self: Self, comptime comp: Component, indices: [component_count]Addr) ?*std.meta.fieldInfo(Entity, comp).type {
             if (self.components[@enumToInt(comp)].get(indices[@enumToInt(comp)])) |res| {
                 return &res.component;
             } else {
@@ -245,7 +243,7 @@ pub fn Scene(comptime EntityType: type, comptime opts: SceneOptions) type {
         pub fn ComponentIterator(comptime required_components: []const Component) type {
             return struct {
                 scene: *const Self,
-                it: std.meta.fields(ComponentStores)[@enumToInt(required_components[0])].field_type.Iterator,
+                it: std.meta.fields(ComponentStores)[@enumToInt(required_components[0])].type.Iterator,
 
                 const Iter = @This();
 
@@ -296,12 +294,12 @@ fn DataStore(comptime T: type) type {
             free: Addr, // The next free entry, if this entry is unallocated
         };
 
-        pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.entries.deinit(allocator);
         }
 
         // HACK: noinline is a workaround for a compiler bug - see comment on "6 components" test
-        pub noinline fn add(self: *Self, allocator: *std.mem.Allocator, value: T) std.mem.Allocator.Error!Addr {
+        pub noinline fn add(self: *Self, allocator: std.mem.Allocator, value: T) std.mem.Allocator.Error!Addr {
             if (self.free != invalid_addr) {
                 const addr = self.free;
                 self.free = self.entries.items[addr].free;
